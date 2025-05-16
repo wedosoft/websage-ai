@@ -48,33 +48,31 @@ def crawl_website():
         return jsonify({'success': False, 'error': 'URL is required'}), 400
     
     try:
-        # Create crawler and start crawling
-        crawler = WebsiteCrawler(max_depth=max_depth, max_pages=max_pages)
+        # Create crawler and start crawling with a timeout to avoid worker timeout
+        crawler = WebsiteCrawler(max_depth=max_depth, max_pages=max_pages, timeout=25)
         pages = crawler.crawl(start_url)
         
         # Store website info in database
-        with app.app_context():
-            # Create website entry
-            website = Website(
-                url=start_url,
-                title=pages[0]['title'] if pages else start_url,
-                max_depth=max_depth,
-                max_pages=max_pages,
-                pages_count=len(pages)
+        website = Website(
+            url=start_url,
+            title=pages[0]['title'] if pages else start_url,
+            max_depth=max_depth,
+            max_pages=max_pages,
+            pages_count=len(pages)
+        )
+        db.session.add(website)
+        db.session.commit()
+        
+        # Store each crawled page
+        for page_data in pages:
+            page = Page(
+                url=page_data['url'],
+                title=page_data['title'],
+                content=page_data['content'],
+                website_id=website.id
             )
-            db.session.add(website)
-            db.session.commit()
-            
-            # Store each crawled page
-            for page_data in pages:
-                page = Page(
-                    url=page_data['url'],
-                    title=page_data['title'],
-                    content=page_data['content'],
-                    website_id=website.id
-                )
-                db.session.add(page)
-            db.session.commit()
+            db.session.add(page)
+        db.session.commit()
         
         # Index the pages in the RAG system
         rag_system.index_documents(pages)
@@ -102,13 +100,38 @@ def chat():
     if not query:
         return jsonify({'success': False, 'error': 'Query is required'}), 400
     
-    if not rag_system.has_documents():
-        return jsonify({
-            'success': False, 
-            'error': 'No website has been crawled yet. Please crawl a website first.'
-        }), 400
-    
     try:
+        # Check if we have documents to query
+        has_docs = rag_system.has_documents()
+        
+        if not has_docs:
+            # Try to load from database if RAG system doesn't have documents
+            website_id = session.get('website_id')
+            
+            if website_id:
+                # Get pages from the database
+                pages = Page.query.filter_by(website_id=website_id).all()
+                
+                if pages:
+                    # Format pages for RAG system
+                    formatted_pages = []
+                    for page in pages:
+                        formatted_pages.append({
+                            'url': page.url,
+                            'title': page.title,
+                            'content': page.content
+                        })
+                    
+                    # Index the pages in the RAG system
+                    rag_system.index_documents(formatted_pages)
+                    has_docs = True
+        
+        if not has_docs:
+            return jsonify({
+                'success': False, 
+                'error': 'No website has been crawled yet. Please crawl a website first.'
+            }), 400
+        
         # Get session ID or create a new one
         chat_session_id = session.get('chat_session_id')
         website_id = session.get('website_id')
@@ -116,55 +139,52 @@ def chat():
         # Make sure we have a website ID
         if not website_id:
             # Try to get the most recent website
-            with app.app_context():
-                latest_website = Website.query.order_by(Website.crawl_date.desc()).first()
-                if latest_website:
-                    website_id = latest_website.id
-                    session['website_id'] = website_id
-                else:
-                    return jsonify({
-                        'success': False, 
-                        'error': 'No website data available. Please crawl a website first.'
-                    }), 400
+            latest_website = Website.query.order_by(Website.crawl_date.desc()).first()
+            if latest_website:
+                website_id = latest_website.id
+                session['website_id'] = website_id
+            else:
+                return jsonify({
+                    'success': False, 
+                    'error': 'No website data available. Please crawl a website first.'
+                }), 400
         
         # Create or get chat session
-        with app.app_context():
-            chat_session = None
-            if chat_session_id:
-                chat_session = ChatSession.query.filter_by(session_id=chat_session_id).first()
-            
-            if not chat_session:
-                # Create new session
-                session_id = str(uuid.uuid4())
-                chat_session = ChatSession(
-                    session_id=session_id,
-                    website_id=website_id
-                )
-                db.session.add(chat_session)
-                db.session.commit()
-                session['chat_session_id'] = session_id
-            
-            # Add user message to database
-            user_message = ChatMessage(
-                role='user',
-                content=query,
-                session_id=chat_session.id
+        chat_session = None
+        if chat_session_id:
+            chat_session = ChatSession.query.filter_by(session_id=chat_session_id).first()
+        
+        if not chat_session:
+            # Create new session
+            session_id = str(uuid.uuid4())
+            chat_session = ChatSession(
+                session_id=session_id,
+                website_id=website_id
             )
-            db.session.add(user_message)
+            db.session.add(chat_session)
             db.session.commit()
+            session['chat_session_id'] = session_id
+        
+        # Add user message to database
+        user_message = ChatMessage(
+            role='user',
+            content=query,
+            session_id=chat_session.id
+        )
+        db.session.add(user_message)
+        db.session.commit()
         
         # Generate response using RAG
         response = rag_system.generate_response(query)
         
         # Store assistant response
-        with app.app_context():
-            assistant_message = ChatMessage(
-                role='assistant',
-                content=response,
-                session_id=chat_session.id
-            )
-            db.session.add(assistant_message)
-            db.session.commit()
+        assistant_message = ChatMessage(
+            role='assistant',
+            content=response,
+            session_id=chat_session.id
+        )
+        db.session.add(assistant_message)
+        db.session.commit()
         
         return jsonify({'success': True, 'response': response})
     except Exception as e:
@@ -179,8 +199,10 @@ def status():
     
     # Check database status
     has_websites = False
-    with app.app_context():
+    try:
         has_websites = Website.query.count() > 0
+    except Exception as e:
+        logger.error(f"Error checking website count: {str(e)}")
     
     return jsonify({
         'crawled_url': crawled_url,
@@ -200,31 +222,30 @@ def chat_history():
         }), 404
     
     try:
-        with app.app_context():
-            chat_session = ChatSession.query.filter_by(session_id=chat_session_id).first()
-            
-            if not chat_session:
-                return jsonify({
-                    'success': False,
-                    'error': 'Chat session not found'
-                }), 404
-            
-            # Get messages
-            messages = ChatMessage.query.filter_by(session_id=chat_session.id).order_by(ChatMessage.timestamp).all()
-            
-            # Format messages
-            formatted_messages = []
-            for msg in messages:
-                formatted_messages.append({
-                    'role': msg.role,
-                    'content': msg.content,
-                    'timestamp': msg.timestamp.isoformat()
-                })
-            
+        chat_session = ChatSession.query.filter_by(session_id=chat_session_id).first()
+        
+        if not chat_session:
             return jsonify({
-                'success': True,
-                'messages': formatted_messages
+                'success': False,
+                'error': 'Chat session not found'
+            }), 404
+        
+        # Get messages
+        messages = ChatMessage.query.filter_by(session_id=chat_session.id).order_by(ChatMessage.timestamp).all()
+        
+        # Format messages
+        formatted_messages = []
+        for msg in messages:
+            formatted_messages.append({
+                'role': msg.role,
+                'content': msg.content,
+                'timestamp': msg.timestamp.isoformat()
             })
+        
+        return jsonify({
+            'success': True,
+            'messages': formatted_messages
+        })
     except Exception as e:
         logger.error(f"Error retrieving chat history: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -233,24 +254,23 @@ def chat_history():
 def get_websites():
     """Get list of crawled websites"""
     try:
-        with app.app_context():
-            websites = Website.query.order_by(Website.crawl_date.desc()).all()
-            
-            # Format websites
-            formatted_websites = []
-            for website in websites:
-                formatted_websites.append({
-                    'id': website.id,
-                    'url': website.url,
-                    'title': website.title,
-                    'crawl_date': website.crawl_date.isoformat(),
-                    'pages_count': website.pages_count
-                })
-            
-            return jsonify({
-                'success': True,
-                'websites': formatted_websites
+        websites = Website.query.order_by(Website.crawl_date.desc()).all()
+        
+        # Format websites
+        formatted_websites = []
+        for website in websites:
+            formatted_websites.append({
+                'id': website.id,
+                'url': website.url,
+                'title': website.title,
+                'crawl_date': website.crawl_date.isoformat(),
+                'pages_count': website.pages_count
             })
+        
+        return jsonify({
+            'success': True,
+            'websites': formatted_websites
+        })
     except Exception as e:
         logger.error(f"Error retrieving websites: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
