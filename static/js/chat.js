@@ -78,8 +78,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Re-enable form controls
                 crawlBtn.disabled = false;
                 urlInput.disabled = false;
-                maxDepthInput.disabled = false;
-                maxPagesInput.disabled = false;
             }, 1000);
         })
         .catch(error => {
@@ -95,8 +93,6 @@ document.addEventListener('DOMContentLoaded', function() {
             // Re-enable form controls
             crawlBtn.disabled = false;
             urlInput.disabled = false;
-            maxDepthInput.disabled = false;
-            maxPagesInput.disabled = false;
         });
     });
     
