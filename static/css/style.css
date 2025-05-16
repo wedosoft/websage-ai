@@ -1,0 +1,92 @@
+/* Custom styles for the chatbot interface */
+
+/* Chat container */
+#chat-container {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Messages container */
+#messages {
+    background-color: var(--bs-dark-bg-subtle);
+    border-color: var(--bs-border-color) !important;
+}
+
+/* User message styling */
+.user-message .message-content {
+    max-width: 80%;
+    text-align: left;
+}
+
+/* Bot message styling */
+.bot-message .message-content {
+    max-width: 80%;
+    border-color: var(--bs-border-color) !important;
+}
+
+/* System message styling */
+.system-message .message-content {
+    width: 100%;
+    font-size: 0.9rem;
+}
+
+/* Typing indicator */
+.typing-dots {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 1.5rem;
+}
+
+.typing-dots span {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin: 0 2px;
+    background-color: var(--bs-light);
+    border-radius: 50%;
+    opacity: 0.6;
+    animation: typingAnimation 1.4s infinite ease-in-out both;
+}
+
+.typing-dots span:nth-child(1) {
+    animation-delay: 0s;
+}
+
+.typing-dots span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.typing-dots span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes typingAnimation {
+    0%, 80%, 100% { 
+        transform: scale(0.6);
+    }
+    40% { 
+        transform: scale(1);
+    }
+}
+
+/* Form styling */
+#crawl-form .form-control,
+#chat-form .form-control {
+    background-color: var(--bs-body-bg);
+    border-color: var(--bs-border-color);
+    color: var(--bs-body-color);
+}
+
+/* Progress bar styling */
+.progress {
+    background-color: var(--bs-dark-bg-subtle);
+}
+
+/* Responsiveness */
+@media (max-width: 768px) {
+    .user-message .message-content,
+    .bot-message .message-content {
+        max-width: 90%;
+    }
+}
