@@ -21,33 +21,13 @@
                         <div class="form-text">Enter the starting URL of the website you want to crawl</div>
                     </div>
                     
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="max-depth" class="form-label">Max Crawl Depth</label>
-                                <div class="input-group">
-                                    <span class="input-group-text"><i class="fas fa-level-down-alt"></i></span>
-                                    <input type="number" class="form-control" id="max-depth" 
-                                           min="1" max="5" value="3">
-                                </div>
-                                <div class="form-text">How many links deep to crawl (1-5)</div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="max-pages" class="form-label">Max Pages</label>
-                                <div class="input-group">
-                                    <span class="input-group-text"><i class="fas fa-file-alt"></i></span>
-                                    <input type="number" class="form-control" id="max-pages" 
-                                           min="5" max="100" value="50">
-                                </div>
-                                <div class="form-text">Maximum number of pages to crawl (5-100)</div>
-                            </div>
-                        </div>
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        This tool extracts content from a single URL for analysis and chat interaction.
                     </div>
                     
                     <button type="submit" class="btn btn-primary" id="crawl-btn">
-                        <i class="fas fa-spider me-2"></i>Start Crawling
+                        <i class="fas fa-file-alt me-2"></i>Extract Content
                     </button>
                 </form>
                 

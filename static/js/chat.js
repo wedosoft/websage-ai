@@ -2,8 +2,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // DOM elements
     const crawlForm = document.getElementById('crawl-form');
     const urlInput = document.getElementById('url');
-    const maxDepthInput = document.getElementById('max-depth');
-    const maxPagesInput = document.getElementById('max-pages');
     const crawlBtn = document.getElementById('crawl-btn');
     const crawlStatus = document.getElementById('crawl-status');
     const crawlProgress = document.getElementById('crawl-progress');
@@ -37,24 +35,18 @@ document.addEventListener('DOMContentLoaded', function() {
         // Disable form controls
         crawlBtn.disabled = true;
         urlInput.disabled = true;
-        maxDepthInput.disabled = true;
-        maxPagesInput.disabled = true;
         
         // Get form values
         const url = urlInput.value;
-        const maxDepth = maxDepthInput.value;
-        const maxPages = maxPagesInput.value;
         
-        // Make API request to start crawling
+        // Make API request to extract content
         fetch('/crawl', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                url: url,
-                max_depth: maxDepth,
-                max_pages: maxPages
+                url: url
             })
         })
         .then(response => response.json())

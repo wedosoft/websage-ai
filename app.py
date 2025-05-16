@@ -2,7 +2,7 @@ import os
 import logging
 import uuid
 from flask import Flask, render_template, request, jsonify, session
-from crawler import WebsiteCrawler
+from simple_crawler import SimpleCrawler
 from rag import RAGSystem
 from models import db, Website, Page, PageChunk, ChatSession, ChatMessage
 
@@ -41,29 +41,27 @@ def crawl_website():
     """Endpoint to start crawling a website"""
     data = request.json
     start_url = data.get('url')
-    max_depth = int(data.get('max_depth', 3))
-    max_pages = int(data.get('max_pages', 50))
     
     if not start_url:
         return jsonify({'success': False, 'error': 'URL is required'}), 400
     
     try:
-        # Create crawler and start crawling with a timeout to avoid worker timeout
-        crawler = WebsiteCrawler(max_depth=max_depth, max_pages=max_pages, timeout=25)
+        # Create crawler and start crawling single page
+        crawler = SimpleCrawler()
         pages = crawler.crawl(start_url)
         
         # Store website info in database
         website = Website(
             url=start_url,
             title=pages[0]['title'] if pages else start_url,
-            max_depth=max_depth,
-            max_pages=max_pages,
+            max_depth=1,  # Single page only
+            max_pages=1,  # Single page only
             pages_count=len(pages)
         )
         db.session.add(website)
         db.session.commit()
         
-        # Store each crawled page
+        # Store the page
         for page_data in pages:
             page = Page(
                 url=page_data['url'],
@@ -84,11 +82,11 @@ def crawl_website():
         
         return jsonify({
             'success': True, 
-            'message': f'Successfully crawled {len(pages)} pages from {start_url}',
+            'message': f'Successfully extracted content from {start_url}',
             'pages_count': len(pages)
         })
     except Exception as e:
-        logger.error(f"Error crawling website: {str(e)}")
+        logger.error(f"Error processing website: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/chat', methods=['POST'])
