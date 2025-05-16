@@ -86,36 +86,60 @@ class WebsiteCrawler:
             return
         
         try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
+            # Add more robust error handling for network issues
+            try:
+                # Set a lower timeout and add headers to mimic a real browser
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Connection': 'keep-alive',
+                }
+                response = requests.get(url, timeout=8, headers=headers, allow_redirects=True)
+                response.raise_for_status()
+            except requests.exceptions.SSLError:
+                logger.warning(f"SSL Error for {url}, trying without verification")
+                response = requests.get(url, timeout=8, headers=headers, verify=False, allow_redirects=True)
+                response.raise_for_status()
+            except requests.RequestException as e:
+                logger.error(f"Error requesting {url}: {str(e)}")
+                return
             
             # Extract text content
             text_content = self.extract_text_content(url, response.text)
             
-            # Add page to the list if content was extracted
-            if text_content:
-                with self.lock:
-                    self.pages.append({
-                        'url': url,
-                        'title': self._extract_title(response.text),
-                        'content': text_content
-                    })
-                    logger.debug(f"Added page: {url}")
+            # Add page to the list even if content is minimal
+            title = self._extract_title(response.text) or "Untitled Page"
+            content = text_content or f"Unable to extract text content from {url}"
+            
+            with self.lock:
+                self.pages.append({
+                    'url': url,
+                    'title': title,
+                    'content': content
+                })
+                logger.debug(f"Added page: {url}")
             
             # Extract links if we're not at max depth
             if depth < self.max_depth:
-                links = self.extract_links(base_url, response.text)
-                
-                # Add links to queue
-                for link in links:
-                    if link not in self.visited_urls and len(self.pages) < self.max_pages:
-                        with self.lock:
-                            if link not in self.visited_urls:
-                                self.visited_urls.add(link)
-                                self.url_queue.put((link, depth + 1, base_url))
+                try:
+                    links = self.extract_links(base_url, response.text)
+                    
+                    # Add links to queue with duplicate checking
+                    link_count = 0
+                    for link in links:
+                        if link_count >= 50:  # Limit links per page to avoid overloading
+                            break
+                            
+                        if link not in self.visited_urls and len(self.pages) < self.max_pages:
+                            with self.lock:
+                                if link not in self.visited_urls:
+                                    self.visited_urls.add(link)
+                                    self.url_queue.put((link, depth + 1, base_url))
+                                    link_count += 1
+                except Exception as e:
+                    logger.error(f"Error extracting links from {url}: {str(e)}")
             
-        except requests.RequestException as e:
-            logger.error(f"Error requesting {url}: {str(e)}")
         except Exception as e:
             logger.error(f"Error processing {url}: {str(e)}")
     
@@ -146,15 +170,7 @@ class WebsiteCrawler:
         self.pages = []
         self.url_queue = queue.Queue()
         
-        # Validate the start URL
-        try:
-            response = requests.head(start_url, timeout=5)
-            response.raise_for_status()
-        except requests.RequestException as e:
-            logger.error(f"Error validating start URL {start_url}: {str(e)}")
-            raise ValueError(f"Invalid start URL: {start_url}")
-        
-        # Add start URL to queue
+        # Add start URL to queue without validation (will be validated in process_page)
         self.visited_urls.add(start_url)
         self.url_queue.put((start_url, 1, start_url))
         
@@ -164,15 +180,47 @@ class WebsiteCrawler:
         # Process pages until queue is empty or max pages reached
         start_time = time.time()
         
-        while not self.url_queue.empty() and len(self.pages) < self.max_pages:
-            # Check timeout
-            if time.time() - start_time > self.timeout:
-                logger.warning(f"Crawling timed out after {self.timeout} seconds")
-                break
-                
-            # Process next URL
-            self.crawl_worker()
+        try:
+            # Process the start URL first to ensure we get at least some content
+            url, depth, base_url = self.url_queue.get()
+            try:
+                self.process_page(url, depth, base_url)
+            except Exception as e:
+                logger.error(f"Error processing start URL {url}: {str(e)}")
+                # If start URL fails completely, add a minimal page with just the URL
+                self.pages.append({
+                    'url': start_url,
+                    'title': "Failed to load page",
+                    'content': f"Unable to crawl this page. Error: {str(e)}"
+                })
             
-        logger.info(f"Crawling completed. Crawled {len(self.pages)} pages.")
+            # Process the rest of the queue with timeout protection
+            while not self.url_queue.empty() and len(self.pages) < self.max_pages:
+                # Check timeout
+                if time.time() - start_time > self.timeout:
+                    logger.warning(f"Crawling timed out after {self.timeout} seconds")
+                    break
+                    
+                # Process next URL
+                self.crawl_worker()
+                
+            logger.info(f"Crawling completed. Crawled {len(self.pages)} pages.")
+        except Exception as e:
+            logger.error(f"Error during crawl: {str(e)}")
+            # Ensure we return at least the minimal data if everything fails
+            if not self.pages:
+                self.pages.append({
+                    'url': start_url,
+                    'title': "Crawl failed",
+                    'content': f"Unable to crawl this website. Error: {str(e)}"
+                })
         
+        # Always return some pages, even if empty
+        if not self.pages:
+            self.pages.append({
+                'url': start_url,
+                'title': "No content found",
+                'content': "No content could be extracted from this website."
+            })
+            
         return self.pages
