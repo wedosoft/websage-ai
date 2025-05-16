@@ -46,8 +46,32 @@ class RAGSystem:
     
     def index_documents(self, pages):
         """Index website pages into ChromaDB"""
-        # Clear existing data
-        self.collection.delete(where={})
+        # Clear existing data by getting all IDs and deleting them
+        try:
+            collection_count = self.collection.count()
+            if collection_count > 0:
+                # Get all IDs to delete them properly
+                results = self.collection.query(
+                    query_texts=[""],  # Empty query to get all
+                    n_results=collection_count
+                )
+                if results and 'ids' in results and results['ids']:
+                    ids_to_delete = results['ids'][0]
+                    if ids_to_delete:
+                        self.collection.delete(ids=ids_to_delete)
+                    else:
+                        # Alternate approach - recreate collection
+                        self.collection = self.chroma_client.get_or_create_collection(
+                            name="website_content",
+                            embedding_function=self.openai_ef
+                        )
+        except Exception as e:
+            logger.warning(f"Error clearing previous data: {str(e)}")
+            # Recreate collection as fallback
+            self.collection = self.chroma_client.get_or_create_collection(
+                name="website_content",
+                embedding_function=self.openai_ef
+            )
         
         documents = []
         metadatas = []
@@ -75,18 +99,22 @@ class RAGSystem:
                 })
                 ids.append(chunk_id)
         
-        # Add documents to the collection in batches
-        batch_size = 100
-        for i in range(0, len(documents), batch_size):
-            end_idx = min(i + batch_size, len(documents))
-            self.collection.add(
-                documents=documents[i:end_idx],
-                metadatas=metadatas[i:end_idx],
-                ids=ids[i:end_idx]
-            )
-            
-        logger.info(f"Indexed {len(documents)} chunks from {len(pages)} pages")
-        self.has_indexed = True
+        # Add documents to the collection in batches (if any)
+        if documents:
+            batch_size = 100
+            for i in range(0, len(documents), batch_size):
+                end_idx = min(i + batch_size, len(documents))
+                self.collection.add(
+                    documents=documents[i:end_idx],
+                    metadatas=metadatas[i:end_idx],
+                    ids=ids[i:end_idx]
+                )
+                
+            logger.info(f"Indexed {len(documents)} chunks from {len(pages)} pages")
+            self.has_indexed = True
+        else:
+            logger.warning("No documents to index")
+            self.has_indexed = False
     
     def has_documents(self):
         """Check if documents have been indexed"""
